@@ -1,0 +1,25 @@
+{
+  "name": "@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "按当前会话的官方模型配置与 Agent preset 压缩策略预览上下文预算，仅在用户确认后保存目标模型 contextWindow。",
+  "license": "MIT",
+  "engines": { "dsh": "0.2.2-rc.2", "node": ">=24.9.0" },
+  "exports": {
+    ".": "./dist/index.js",
+    "./client": "./dist/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["dist", "locale/*.json", "icon.svg", "cordis.patch.yml", "README.md", "LICENSE"],
+  "scripts": { "build": "node scripts/build.mjs", "test": "node --test test/*.test.js" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-session"]
+    }
+  }
+}
