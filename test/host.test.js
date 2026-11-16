@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apply, createBudgetController } from '../src/host.js';
+import { ENDPOINT, RPC_PATH, apply, createBudgetController } from '../src/host.js';
 
 const PI_AI = '@deepseek-ai/dsh-llm-pi-ai';
 const API_KEY = '@deepseek-ai/dsh-llm-deepseek-api-key';
@@ -34,7 +34,7 @@ function fixture({ family = PI_AI, profile, installed = [], model = 'sol', provi
   let rejectWrite = false;
   let badReadback = false;
   let committed = false;
-  let rpc;
+  let fetchRoute;
   let tool;
   const ns = 'llm-models';
   const getProfile = () => at(raw, path);
@@ -88,14 +88,17 @@ function fixture({ family = PI_AI, profile, installed = [], model = 'sol', provi
           ...(explicit?.maxTokens === undefined ? {} : { defaultMaxTokens: explicit.maxTokens }) };
       },
     },
-    connection: { browserPeer: {}, rpc: {
-      handle(channel, handler) {
-        assert.match(channel, /^\/[A-Za-z0-9._~-]+$/);
-        assert.notEqual(channel, '/api');
-        rpc = handler; return () => {};
+    connection: {
+      browserPeer: {},
+      admit(request) { return { peer: request.headers.get('x-test-peer') === 'browser' ? ctx.connection.browserPeer : {} }; },
+      fetch: {
+        register(route) {
+          assert.equal(route.path, RPC_PATH);
+          fetchRoute = route.fetch; return () => {};
+        },
       },
-      intercept() { throw new Error('connection: shared RPC channel "/api" already has an interceptor'); },
-    } },
+      rpc: { intercept() { throw new Error('connection: shared RPC channel "/api" already has an interceptor'); } },
+    },
     tools: { register(definition) { tool = definition; return () => {}; } },
     effect: operation => operation(),
   };
@@ -107,7 +110,14 @@ function fixture({ family = PI_AI, profile, installed = [], model = 'sol', provi
     onResolve: hook => { resolveHook = hook; },
     rejectWrite: () => { rejectWrite = true; },
     badReadback: () => { badReadback = true; },
-    rpc: (...args) => rpc(...args), tool: () => tool,
+    async rpc(method, payload, signal, peer) {
+      const response = await fetchRoute(new Request(`http://localhost${RPC_PATH}`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-test-peer': peer === ctx.connection.browserPeer ? 'browser' : 'api' },
+        body: JSON.stringify({ type: 'client-request', rpcId: 'test-budget', method, payload }), signal,
+      }));
+      return (await response.json()).result;
+    },
+    tool: () => tool,
   };
 }
 
@@ -223,10 +233,10 @@ test('非 browserPeer 的 RPC 不可读取或授权保存', async () => {
   const f = fixture(); apply(f.ctx);
   const before = f.raw();
   const signal = new AbortController().signal;
-  const denied = await f.rpc('budget', { sessionId: 'session-1', action: 'save', token: 'forged' }, signal, {});
+  const denied = await f.rpc(ENDPOINT, { sessionId: 'session-1', action: 'save', token: 'forged' }, signal, {});
   assert.equal(denied.ok, false);
   assert.equal(denied.error.code, 'budget/forbidden');
-  const allowed = await f.rpc('budget', { sessionId: 'session-1', action: 'read' }, signal, f.ctx.connection.browserPeer);
+  const allowed = await f.rpc(ENDPOINT, { sessionId: 'session-1', action: 'read' }, signal, f.ctx.connection.browserPeer);
   assert.equal(allowed.ok, true);
   assert.deepEqual(f.raw(), before);
 });
@@ -244,19 +254,19 @@ test('只读工具与 UI 使用相同预算，不签发确认 token、不干扰�
   const f = fixture(); apply(f.ctx);
   const before = f.raw();
   const signal = new AbortController().signal;
-  const ui = await f.rpc('budget', { sessionId: 'session-1', action: 'read' }, signal, f.ctx.connection.browserPeer);
+  const ui = await f.rpc(ENDPOINT, { sessionId: 'session-1', action: 'read' }, signal, f.ctx.connection.browserPeer);
   const exec = { agent: f.agent, signal };
   const tool = f.tool();
   const read = await tool.execute({ action: 'read' }, exec);
   assert.deepEqual(read, ui.value);
-  const pending = await f.rpc('budget', { sessionId: 'session-1', action: 'preview', modelId: 'sol', target: 260_000 }, signal, f.ctx.connection.browserPeer);
+  const pending = await f.rpc(ENDPOINT, { sessionId: 'session-1', action: 'preview', modelId: 'sol', target: 260_000 }, signal, f.ctx.connection.browserPeer);
   assert.equal(pending.ok, true);
   const calculated = await tool.execute({ action: 'preview', modelId: 'sol', target: 300_000 }, exec);
   assert.equal(calculated.after.contextWindow, 493_536);
   assert.equal(calculated.token, undefined);
   await assert.rejects(tool.execute({ action: 'save', token: pending.value.token }, exec), codeIs('readonly'));
   assert.deepEqual(f.raw(), before);
-  const saved = await f.rpc('budget', { sessionId: 'session-1', action: 'save', token: pending.value.token }, signal, f.ctx.connection.browserPeer);
+  const saved = await f.rpc(ENDPOINT, { sessionId: 'session-1', action: 'save', token: pending.value.token }, signal, f.ctx.connection.browserPeer);
   assert.equal(saved.ok, true);
   assert.equal(saved.value.contextWindow, 453_536);
 });

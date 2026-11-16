@@ -2,8 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { BudgetError, calculateBudget, invertBudget, routedPolicy } from './budget.js';
 
 export const PACKAGE = '@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1';
-export const CHANNEL = '/dsh-local-model-budget-559fb07a-7828-4e51-a989-88b2f9591ca1';
-export const ENDPOINT = 'budget';
+export const CHANNEL = '/api';
+export const ENDPOINT = 'dsh-local-model-budget-559fb07a-7828-4e51-a989-88b2f9591ca1/budget';
+export const RPC_PATH = `${CHANNEL}/${ENDPOINT}`;
 export const inject = ['connection', 'llm', 'agents', 'agentPresets', 'settingsController', 'configEditor', 'tools'];
 const PI_AI = '@deepseek-ai/dsh-llm-pi-ai';
 const API_KEY = '@deepseek-ai/dsh-llm-deepseek-api-key';
@@ -216,17 +217,32 @@ export function createBudgetController(ctx) {
 export function apply(ctx) {
   const controller = createBudgetController(ctx);
   ctx.effect(() => () => controller.dispose());
-  // /api belongs to the official gateway's sole interceptor. This channel
-  // has its own authenticated route and cannot shadow the gateway.
-  ctx.effect(() => ctx.connection.rpc.handle(CHANNEL,
-    async (endpoint, payload, signal, peer) => {
-      // Confirmation is user-only: no agent tool or generic API peer can save.
-      if (peer !== ctx.connection.browserPeer) return {
+  // Exact Fetch routes coexist with the gateway's sole /api interceptor.
+  // The official bridge authenticates requests; admit() also distinguishes
+  // the GUI browser Peer from authenticated API Peers before confirmation.
+  ctx.effect(() => ctx.connection.fetch.register({
+    path: RPC_PATH, methods: ['POST'], requestBody: 'buffered',
+    async fetch(request) {
+      const admission = ctx.connection.admit(request);
+      if ('rejection' in admission) return new Response('unauthorized', { status: admission.rejection });
+      const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') return new Response('content type must be application/json', { status: 415 });
+      let envelope;
+      try { envelope = await request.json(); }
+      catch { return new Response('body is not JSON', { status: 400 }); }
+      if (!record(envelope) || typeof envelope.rpcId !== 'string' || !envelope.rpcId) {
+        return new Response('invalid RPC envelope', { status: 400 });
+      }
+      const respond = result => Response.json({ type: 'server-response', rpcId: envelope.rpcId, result });
+      if (admission.peer !== ctx.connection.browserPeer) return respond({
         ok: false, error: { code: 'budget/forbidden', message: '此操作仅供当前 GUI 用户使用。', details: {} },
-      };
+      });
+      const payload = envelope.payload;
+      const signal = request.signal;
       try {
-        if (endpoint !== ENDPOINT || !record(payload) || typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) {
-          throw new BudgetError('request', '需要当前会话 ID。');
+        if (envelope.type !== 'client-request' || envelope.method !== ENDPOINT || !record(payload)
+          || typeof payload.sessionId !== 'string' || !payload.sessionId) {
+          throw new BudgetError('request', '无效 RPC 请求或缺少当前会话 ID。');
         }
         let value;
         if (payload.action === 'read') value = await controller.read(payload.sessionId, signal);
@@ -235,11 +251,12 @@ export function apply(ctx) {
         } else if (payload.action === 'save' && typeof payload.token === 'string') {
           value = await controller.save(payload.sessionId, payload.token, signal);
         } else throw new BudgetError('request', '无效的模型预算请求。');
-        return { ok: true, value };
+        return respond({ ok: true, value });
       } catch (error) {
-        return { ok: false, error: { code: `budget/${error?.code ?? 'error'}`, message: messageOf(error), details: {} } };
+        return respond({ ok: false, error: { code: `budget/${error?.code ?? 'error'}`, message: messageOf(error), details: {} } });
       }
-    }));
+    },
+  }));
   // Read/calculation operations share the UI controller, but never issue a
   // confirmation token or touch the GUI user's pending preview.
   ctx.effect(() => ctx.tools.register({

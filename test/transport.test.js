@@ -2,49 +2,65 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { CHANNEL, ENDPOINT, apply } from '../src/host.js';
+import * as plugin from '../src/host.js';
+const { ENDPOINT, RPC_PATH } = plugin;
 
 const require = createRequire(import.meta.url);
 const anchor = process.env.DSH_INSTALL_DIR ?? process.cwd();
 const load = name => import(pathToFileURL(require.resolve(name, { paths: [anchor] })).href);
 
-test('实际安装版 Connection：独立通道可与官方 /api interceptor 共存并撤回', async () => {
+test('实际安装版 Connection：精确预算路由在真实插件作用域内与 Gateway 共存、认证并撤回', async () => {
   const { Context } = await load('@deepseek-ai/cordis');
   const { HostConnectionService } = await load('@deepseek-ai/dsh-client-connection');
   const ctx = new Context();
-  const routes = new Map();
-  ctx.provide('webServer', {
-    protocol: 'http:',
-    register(route) {
-      assert.equal(routes.has(route.path), false);
-      routes.set(route.path, route);
-      return async () => { routes.delete(route.path); };
+  // Same-level providers reproduce Cordis's real dependency boundary. Root
+  // provisions and direct apply() would hide dependencies in service code.
+  await ctx.plugin(provider => {
+    provider.provide('webServer', { protocol: 'http:' });
+  });
+  await ctx.plugin({
+    apply(provider) {
+      new HostConnectionService(provider, [], {
+        isAuthenticated: request => new Headers(request.headers).get('cookie') === 'budget-test-owner',
+        authenticateApi: () => undefined,
+      });
     },
   });
-  const connection = new HostConnectionService(ctx, [], { isAuthenticated: () => true });
-  const ok = async () => ({ ok: true, value: 'official gateway' });
-  const unregisterOfficial = connection.rpc.intercept('/api', () => true, ok);
+  const connection = ctx.connection;
+  const unregisterOfficial = connection.rpc.intercept('/api', endpoint => endpoint === 'check',
+    async () => ({ ok: true, value: 'official gateway' }));
+  const request = (endpoint, payload = {}, cookie = 'budget-test-owner', method = endpoint) => new Request(`http://localhost/api/${endpoint}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', host: 'localhost', cookie },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'test-transport', method, payload }),
+  });
   try {
-    assert.throws(() => connection.rpc.intercept('/api', () => false, ok), /already has an interceptor/);
-    assert.throws(() => connection.rpc.handle('/api', ok), /reserved RPC channel/);
-    assert.match(ENDPOINT, /^[A-Za-z0-9_$.-]+$/);
-    // Register the actual plugin, not a mirrored handler. Only its transport
-    // and read-only tool are instantiated; no real profile/services are read.
+    assert.throws(() => connection.rpc.intercept('/api', () => false, async () => ({})), /already has an interceptor/);
+    // Business placeholders are not read: these transport probes use an invalid
+    // action, and no actual profile, credential, Agent or model is instantiated.
+    for (const name of ['llm', 'agents', 'agentPresets', 'settingsController', 'configEditor']) ctx.provide(name, {});
     ctx.provide('tools', { register() { return () => {}; } });
-    apply(ctx);
-    assert.equal(routes.has(CHANNEL), true);
+    const fiber = await ctx.plugin(plugin);
     const shared = connection.createSharedFetchHandler('/api');
-    const request = new Request('http://localhost/api/check', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ type: 'client-request', rpcId: 'test-gateway', method: 'check', payload: {} }),
-    });
-    const response = await shared.fetch(request, connection.browserPeer);
+    const official = await shared.fetch(request('check'), connection.browserPeer);
+    assert.equal((await official.json()).result.value, 'official gateway');
+    assert.equal(shared.requestBodyMode({ method: 'POST', url: new URL(`http://localhost${RPC_PATH}`) }), 'buffered');
+    const response = await shared.fetch(request(ENDPOINT, { sessionId: 'test-session', action: 'invalid' }), connection.browserPeer);
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).result.value, 'official gateway');
+    const envelope = await response.json();
+    assert.equal(envelope.type, 'server-response');
+    assert.equal(envelope.rpcId, 'test-transport');
+    assert.equal(envelope.result.error.code, 'budget/request');
+    const mismatch = await shared.fetch(request(ENDPOINT, {}, 'budget-test-owner', 'wrong-method'), connection.browserPeer);
+    assert.equal((await mismatch.json()).result.error.code, 'budget/request');
+    const unauthenticated = await shared.fetch(request(ENDPOINT, {}, ''), connection.browserPeer);
+    assert.equal(unauthenticated.status, 401);
+    const untrusted = new Request(request(ENDPOINT), { headers: { 'content-type': 'application/json', host: 'untrusted.example', cookie: 'budget-test-owner' } });
+    assert.equal((await shared.fetch(untrusted, connection.browserPeer)).status, 403);
+    await fiber.dispose();
+    assert.equal((await shared.fetch(request(ENDPOINT), connection.browserPeer)).status, 404);
+    assert.equal((await shared.fetch(request('check'), connection.browserPeer)).status, 200);
   } finally {
     await unregisterOfficial();
-    await connection.browserPeer.dispose();
     await ctx.fiber.dispose();
   }
-  assert.equal(routes.size, 0);
 });
