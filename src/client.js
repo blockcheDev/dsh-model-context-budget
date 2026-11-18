@@ -1,12 +1,12 @@
 export function createClientPlugin(React, css, dictionaries) {
   const h = React.createElement;
   const { useEffect, useId, useRef, useState, useSyncExternalStore } = React;
-  const PACKAGE = '@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1';
+  const PACKAGE = '@local/model-context-budget';
   const PANEL = `${PACKAGE}:page`;
   const SESSION = `${PACKAGE}:session`;
   const NS = `${PACKAGE}:ui`;
   const CHANNEL = '/api';
-  const ENDPOINT = 'dsh-local-model-budget-559fb07a-7828-4e51-a989-88b2f9591ca1/budget';
+  const ENDPOINT = 'local-model-context-budget/budget';
 
   function Icon({ size = 20 }) {
     return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true },

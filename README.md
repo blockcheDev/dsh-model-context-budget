@@ -27,7 +27,7 @@ Host 使用官方 `llm.listConfigurableProviders()` 的 settingsNs/settingsPath�
 
 会话请求 maxTokens 覆盖、路由变化与在途请求可能使实际阈值不同。更改影响当前 profile 中该模型的后续请求，非仅当前会话。此插件不运行压缩、不修改官方压缩策略、不改变模型选择、不触碰凭据，不添加定时任务或其他数据源。确认操作仅供官方 Connection 的当前 browserPeer 使用；只读 `model_context_budget` 工具可查询/反算，但不返回确认 token、不干扰用户预览、不能保存配置。
 
-RPC 使用 `/api` 下插件独占 UUID 路径的 `connection.fetch.register()` 精确路由，保留官方 Client RPC 信封与错误反馈。由官方载体执行 Host/Origin/认证检查，并再次通过 `connection.admit()` 确认调用者是 browserPeer；不占用官方 Gateway 的唯一 interceptor。当前安装版 `connection.rpc.handle()` 的内部服务作用域无法读取 webServer，因此不采用该注册方式，也不修改官方包或配置。反算窗口高于当前声明值时提示核实端点真实容量；公式计算不意味着端点支持该容量。
+RPC 使用插件独占的 `/api/local-model-context-budget/budget` 路径，通过 `connection.fetch.register()` 精确路由，保留官方 Client RPC 信封与错误反馈。由官方载体执行 Host/Origin/认证检查，并再次通过 `connection.admit()` 确认调用者是 browserPeer；不占用官方 Gateway 的唯一 interceptor。当前安装版 `connection.rpc.handle()` 的内部服务作用域无法读取 webServer，因此不采用该注册方式，也不修改官方包或配置。反算窗口高于当前声明值时提示核实端点真实容量；公式计算不意味着端点支持该容量。
 
 所有 UI 注册均属于本插件生命周期：`sidebar.panellist` 入口与唯一 `main` key，以及本页独占的 session-maybe 子槽。卸载只移除本插件的 UI；仅当本页仍被选中时返回会话，不关闭其他页面。草稿仅在插件存活的内存中保留；正式配置仅保存在官方 profile 服务。
 
@@ -48,11 +48,17 @@ npm run build
 
 克隆仓库后，使用 Node.js 24.9 或以上版本运行 `npm run build`，再通过 DSH 的 **Plugins → Add plugin** 选择本地仓库目录安装。无需下载项目依赖，也不需要新增安装脚本。发布包之前同样先构建，再用 `npm pack --dry-run` 检查运行文件是否齐全。
 
-目录整理不改变插件身份：目前保留已有的 `package.name`、Loader entry ID 和 Client key，避免与已安装版本形成两套插件。GitHub 仓库名与 npm 包名可以不同；若后续需要稳定包名，应统一修改这些身份并迁移已有安装，而不是只改 manifest。
+长期维护的稳定包名为 `@local/model-context-budget`，Loader entry ID 为 `@local/model-context-budget:budget`，Client 页面 key 为 `@local/model-context-budget:page`。GitHub 仓库名与 npm 包名可以不同。后续迭代保持这些身份不变，修改源码、递增 manifest 版本并重新构建；构建脚本不锁定发布版本。
 
-DSH 管理的生成副本不会自动跟随本仓库更新。正式接入本维护目录时，通过官方插件管理重新安装，并按返回的 `application` / `nextStep` 判断是否已生效或需要重启；构建成功不等于当前 GUI 已更新。
+### 从自动生成包迁移
+
+1.0.1 将旧包 `@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1` 迁移为上述可读包名，并同步加载声明、Client Module Loader ID、页面/翻译命名空间及 RPC 路径。已有安装应先通过官方插件管理移除旧包，再构建并安装本维护目录，避免新旧插件并存。正式模型配置保存在官方配置服务，不依赖插件包名，无需搬迁；内存草稿及未确认预览随旧插件卸载失效。
+
+原个性化页面创建卡片仍绑定旧包名和 DSH 保留的生成副本；它不会跟随本仓库更新，不再用于恢复或管理长期维护版。再次使用旧卡片恢复会重新安装旧身份的生成副本，可能与维护版冲突。今后统一通过 **Plugins** 管理本维护目录，按返回的 `application` / `nextStep` 判断是否已生效或需要重启；构建成功不等于当前 GUI 已更新。
 
 ## 安装后的验证
+
+1.0.1 包名迁移已通过官方插件管理完成，旧包移除与新包安装均返回 `application: applied`。新包从本维护目录链接安装；当前 GUI 的 Client Inspect 已确认新侧栏入口、main key 和 session-maybe 子槽，旧身份已撤回。构建与打包清单检查通过，15 项测试全部通过；独立指定新 RPC 路径的回归测试在迁移前返回 404、迁移后通过。线上只执行只读预览，模型配置 revision 仍为 1，原窗口与预算保持不变，没有再次执行配置保存。迁移后的实际页面显示和交互仍需用户打开页面确认。
 
 已通过当前安装版的真实 Host 激活、模型只读查询和阈值反算验证；Client Inspect 已确认左侧入口、独立 main key 与 session-maybe 子槽注册。用户已确认实际页面的模型列表、预览和保存正常；保存后通过只读接口回读确认：`gpt-6.1-sol` 的窗口为 `453536`、默认输出预留仍为 `128000`、默认官方压缩阈值为 `260000`、近期原文保留预算为 `52085`。此次真实配置写入由用户在 GUI 中确认执行。
 

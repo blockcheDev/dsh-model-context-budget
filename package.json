@@ -1,6 +1,6 @@
 {
-  "name": "@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1",
-  "version": "1.0.0",
+  "name": "@local/model-context-budget",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "按当前会话的官方模型配置与 Agent preset 压缩策略预览上下文预算，仅在用户确认后保存目标模型 contextWindow。",

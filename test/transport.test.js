@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import * as plugin from '../src/host.js';
-const { ENDPOINT, RPC_PATH } = plugin;
+// Public route of the maintained package; do not derive the expectation from
+// the Host implementation, which would also accept a stale generated endpoint.
+const ENDPOINT = 'local-model-context-budget/budget';
+const RPC_PATH = `/api/${ENDPOINT}`;
 
 const require = createRequire(import.meta.url);
 const anchor = process.env.DSH_INSTALL_DIR ?? process.cwd();

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { BudgetError, calculateBudget, invertBudget, routedPolicy } from './budget.js';
 
-export const PACKAGE = '@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1';
+export const PACKAGE = '@local/model-context-budget';
 export const CHANNEL = '/api';
-export const ENDPOINT = 'dsh-local-model-budget-559fb07a-7828-4e51-a989-88b2f9591ca1/budget';
+export const ENDPOINT = 'local-model-context-budget/budget';
 export const RPC_PATH = `${CHANNEL}/${ENDPOINT}`;
 export const inject = ['connection', 'llm', 'agents', 'agentPresets', 'settingsController', 'configEditor', 'tools'];
 const PI_AI = '@deepseek-ai/dsh-llm-pi-ai';

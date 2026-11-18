@@ -3,12 +3,12 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(import.meta.dirname, '..');
-const packageName = '@dsh-local/view-559fb07a-7828-4e51-a989-88b2f9591ca1';
+const packageName = '@local/model-context-budget';
 const read = file => readFile(resolve(root, file), 'utf8');
 const manifest = JSON.parse(await read('package.json'));
 const patch = JSON.parse(await read('cordis.patch.yml'));
-if (manifest.name !== packageName || manifest.version !== '1.0.0'
-  || manifest.dsh.bundle.patch !== './cordis.patch.yml') throw new Error('Reserved manifest mismatch');
+if (manifest.name !== packageName
+  || manifest.dsh.bundle.patch !== './cordis.patch.yml') throw new Error('Manifest mismatch');
 if (!Array.isArray(patch) || patch.length !== 1 || Object.keys(patch[0]).join() !== 'insert'
   || patch[0].insert.length !== 1 || !patch[0].insert.every(entry => entry.id.startsWith(`${packageName}:`)
     && entry.name === packageName)) throw new Error('Invalid independent bundle patch');
